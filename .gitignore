@@ -1,0 +1,17 @@
+
+backend/data/
+backend/.venv/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+node_modules/
+.env
+.env.local
+dist/
+build/
+.DS_Store
+*.log
+
+# Mantieni il frontend compilato
+!frontend/dist/
+!frontend/dist/**
