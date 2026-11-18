@@ -11,7 +11,8 @@ if not exist ".venv\Scripts\python.exe" (
   echo Ambiente Python non trovato: eseguite prima windows\installa.cmd
   exit /b 1
 )
-if defined PAZIENTI_DATA_DIR (set "DATI=%PAZIENTI_DATA_DIR%") else (set "DATI=%CD%\data")
+if not defined PAZIENTI_DATA_DIR set "PAZIENTI_DATA_DIR=%USERPROFILE%\GestionePazienti-dati"
+set "DATI=%PAZIENTI_DATA_DIR%"
 if not exist "%DATI%" mkdir "%DATI%"
 rem all'accensione del PC (o con avvia.cmd) un eventuale "fermato" precedente non conta piu'
 if exist "%DATI%\fermato.flag" del /q "%DATI%\fermato.flag"

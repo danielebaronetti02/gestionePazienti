@@ -1,16 +1,18 @@
 {
   "name": "gestione-pazienti-frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/crypto.test.mjs && node tests/import.test.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "pdfjs-dist": "6.2.108"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",

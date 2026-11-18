@@ -67,14 +67,15 @@ export function TrendChart({ points, unit = "", width = 560, height = 230 }) {
     <svg className="trend" viewBox={`0 0 ${width} ${height}`} role="img">
       {ticks.map((v) => (
         <g key={v}>
-          <line x1={pl} x2={width - pr} y1={y(v)} y2={y(v)} stroke={GRID} strokeWidth="1" />
-          <text x={pl - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill={LABEL}>
+          <line x1={pl} x2={width - pr} y1={y(v)} y2={y(v)} stroke={GRID} strokeWidth="1" className="trend-gridline" />
+          <text x={pl - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill={LABEL} className="trend-label">
             {num(v)}
           </text>
         </g>
       ))}
       <polyline
         fill="none"
+        className="trend-line"
         stroke={LINE}
         strokeWidth="2.2"
         strokeLinejoin="round"
@@ -88,23 +89,24 @@ export function TrendChart({ points, unit = "", width = 560, height = 230 }) {
           textAnchor={i === labels.length - 1 && labels.length > 1 ? "end" : i === 0 ? "start" : "middle"}
           fontSize="11"
           fill={LABEL}
+          className="trend-label"
         >
           {shortDate(c.date)}
         </text>
       ))}
       {coords.map((c, i) => (
         <g key={i}>
-          <circle cx={c.x} cy={c.y} r="4" fill="#fff" stroke={LINE} strokeWidth="2">
+          <circle cx={c.x} cy={c.y} r="4" fill="#fff" stroke={LINE} strokeWidth="2" className="trend-point">
             <title>{`${shortDate(c.date)}: ${c.raw} ${unit}`}</title>
           </circle>
           {showValues && (
-            <text x={c.x} y={c.y - 9} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1d2733">
+            <text x={c.x} y={c.y - 9} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1d2733" className="trend-value">
               {num(c.value)}
             </text>
           )}
         </g>
       ))}
-      <line x1={pl} x2={width - pr} y1={pt + h} y2={pt + h} stroke={AXIS} />
+      <line x1={pl} x2={width - pr} y1={pt + h} y2={pt + h} stroke={AXIS} className="trend-axis" />
     </svg>
   );
 }

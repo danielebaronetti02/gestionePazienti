@@ -51,8 +51,13 @@ export function ExamTable({ exams, showPatient = true, back }) {
               <td>
                 {e.result_value ? (
                   <>
-                    <strong>{e.result_value}</strong> {e.result_unit || ""}
-                    <div className="sub">{itDate(e.result_date)}</div>
+                    <span className={`result-value${(e.result_value || "").length > 40 ? " long" : e.out_of_range ? " out-of-range" : ""}`}
+                          title={e.out_of_range ? "Fuori dall'intervallo di riferimento" : undefined}>
+                      <strong>{e.result_value}</strong> {e.result_unit || ""}{e.out_of_range ? " ⚠" : ""}
+                    </span>
+                    <div className="sub">
+                      {itDate(e.result_date)}{e.reference_range ? ` · rif. ${e.reference_range}` : ""}
+                    </div>
                   </>
                 ) : (
                   "—"

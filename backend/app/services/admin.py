@@ -193,15 +193,23 @@ def set_pathology_active(ctx, pathology_id: int, active: bool):
     ctx.db.commit()
 
 
-def add_exam_type(ctx, data: dict):
+def _clean_aliases(text) -> str | None:
+    parts = [a.strip() for a in str(text or "").replace(",", "|").replace(";", "|").split("|")]
+    return "|".join(dict.fromkeys(a for a in parts if a)) or None
+
+
+def add_exam_type(ctx, data: dict) -> int:
     ctx.require_admin()
     name = (data.get("name") or "").strip()
     if not name:
         raise Invalid("Nome esame obbligatorio.")
-    _insert_unique(ctx.db, "INSERT INTO exam_types (name, category, unit) VALUES (?,?,?)",
-                   (name, (data.get("category") or "").strip() or "Altro", (data.get("unit") or "").strip() or None))
+    _insert_unique(ctx.db, "INSERT INTO exam_types (name, category, unit, code, aliases) VALUES (?,?,?,?,?)",
+                   (name, (data.get("category") or "").strip() or "Altro", (data.get("unit") or "").strip() or None,
+                    (data.get("code") or "").strip() or None, _clean_aliases(data.get("aliases"))))
+    new_id = ctx.db.execute("SELECT id FROM exam_types WHERE name = ?", (name,)).fetchone()[0]
     audit(ctx, "catalogo_aggiunge_esame", details=name)
     ctx.db.commit()
+    return new_id
 
 
 def update_exam_type(ctx, type_id: int, data: dict):
@@ -212,7 +220,33 @@ def update_exam_type(ctx, type_id: int, data: dict):
     category = (data["category"].strip() or "Altro") if data.get("category") is not None else row["category"]
     unit = (data["unit"].strip() or None) if data.get("unit") is not None else row["unit"]
     active = int(data["active"]) if data.get("active") is not None else row["active"]
-    ctx.db.execute("UPDATE exam_types SET category = ?, unit = ?, active = ? WHERE id = ?", (category, unit, active, type_id))
+    code = (data["code"].strip() or None) if data.get("code") is not None else row["code"]
+    aliases = _clean_aliases(data["aliases"]) if data.get("aliases") is not None else row["aliases"]
+    ctx.db.execute("UPDATE exam_types SET category = ?, unit = ?, active = ?, code = ?, aliases = ? WHERE id = ?",
+                   (category, unit, active, code, aliases, type_id))
+    ctx.db.commit()
+
+
+def delete_exam_type(ctx, type_id: int):
+    """Solo admin. Il server non può sapere se il tipo è usato (gli esami sono cifrati):
+    il controllo lo fa il browser dell'admin prima di chiamare questa funzione."""
+    ctx.require_admin()
+    row = ctx.db.execute("SELECT name FROM exam_types WHERE id = ?", (type_id,)).fetchone()
+    if row is None:
+        raise NotFound("Esame non trovato.")
+    ctx.db.execute("DELETE FROM exam_types WHERE id = ?", (type_id,))
+    audit(ctx, "catalogo_elimina_esame", details=row["name"])
+    ctx.db.commit()
+
+
+def delete_pathology(ctx, pathology_id: int):
+    """Solo admin. Come per gli esami, il controllo d'uso lo fa il browser (i dati clinici sono cifrati)."""
+    ctx.require_admin()
+    row = ctx.db.execute("SELECT name FROM pathologies WHERE id = ?", (pathology_id,)).fetchone()
+    if row is None:
+        raise NotFound("Patologia non trovata.")
+    ctx.db.execute("DELETE FROM pathologies WHERE id = ?", (pathology_id,))
+    audit(ctx, "catalogo_elimina_patologia", details=row["name"])
     ctx.db.commit()
 
 

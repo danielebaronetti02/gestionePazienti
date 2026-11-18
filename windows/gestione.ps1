@@ -7,11 +7,12 @@
     gestione.ps1 disattiva-avvio-automatico   toglie l'avvio automatico
     gestione.ps1 avvia | ferma | riavvia      controllo manuale del server
     gestione.ps1 stato                        il server e' acceso? l'avvio automatico e' attivo?
+    gestione.ps1 aggiorna                     scarica l'ultima versione e la installa SENZA toccare i dati
     gestione.ps1 apri-firewall                apre la porta nel firewall di Windows (per gli altri PC; serve HTTPS, vedi README)
 #>
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("installa", "attiva-avvio-automatico", "disattiva-avvio-automatico", "avvia", "ferma", "riavvia", "stato", "apri-firewall")]
+  [ValidateSet("installa", "attiva-avvio-automatico", "disattiva-avvio-automatico", "avvia", "ferma", "riavvia", "stato", "apri-firewall", "aggiorna")]
   [string]$Azione = "stato",
   [string]$Utente = "",
   [switch]$Pausa
@@ -25,18 +26,23 @@ $Backend      = Join-Path $Progetto "backend"
 $Frontend     = Join-Path $Progetto "frontend"
 $PythonVenv   = Join-Path $Backend ".venv\Scripts\python.exe"
 $AvviaServer  = Join-Path $Cartella "avvia-server.cmd"
-$DatiDir      = Join-Path $Backend "data"
-$FlagFermato  = Join-Path $DatiDir "fermato.flag"
-$Log          = Join-Path $DatiDir "server.log"
+$Locali       = Join-Path $Cartella "impostazioni-locali.cmd"
+$VecchiDati   = Join-Path $Backend "data"       # posizione dei dati fino alla versione 3.0
 
-# --- impostazioni (porta) lette da impostazioni.cmd ---------------------------------
-$Porta = 8000
-$righe = Get-Content (Join-Path $Cartella "impostazioni.cmd")
-foreach ($r in $righe) { if ($r -match '^\s*set\s+PAZIENTI_PORTA=(\d+)') { $Porta = [int]$Matches[1] } }
-$DatiPersonalizzati = $righe | Where-Object { $_ -match '^\s*set\s+PAZIENTI_DATA_DIR=(.+)$' } | Select-Object -First 1
-if ($DatiPersonalizzati -and $DatiPersonalizzati -match 'PAZIENTI_DATA_DIR=(.+)$') {
-  $DatiDir = $Matches[1].Trim(); $FlagFermato = Join-Path $DatiDir "fermato.flag"; $Log = Join-Path $DatiDir "server.log"
+# --- impostazioni: impostazioni.cmd (del programma) poi impostazioni-locali.cmd (di questo PC, prevale) ---
+$Imp = @{ PAZIENTI_PORTA = "8000"; PAZIENTI_DATA_DIR = (Join-Path $env:USERPROFILE "GestionePazienti-dati");
+          PAZIENTI_REPO = ""; PAZIENTI_RAMO = "main"; PAZIENTI_GITHUB_TOKEN = "" }
+foreach ($file in @((Join-Path $Cartella "impostazioni.cmd"), $Locali)) {
+  if (-not (Test-Path $file)) { continue }
+  foreach ($r in (Get-Content $file)) {
+    if ($r -match '^\s*set\s+"?(PAZIENTI_[A-Z_]+)=([^"]*)"?\s*$') { $Imp[$Matches[1]] = $Matches[2].Trim() }
+  }
 }
+$Porta       = [int]$Imp.PAZIENTI_PORTA
+$DatiDir     = [Environment]::ExpandEnvironmentVariables($Imp.PAZIENTI_DATA_DIR)
+$FlagFermato = Join-Path $DatiDir "fermato.flag"
+$Log         = Join-Path $DatiDir "server.log"
+$env:PAZIENTI_DATA_DIR = $DatiDir
 $Url = "http://localhost:$Porta"
 
 function Scrivi([string]$testo, [string]$colore = "Gray") { Write-Host $testo -ForegroundColor $colore }
@@ -62,6 +68,29 @@ function Richiedi-Amministratore {
   try { Start-Process powershell.exe -Verb RunAs -ArgumentList $argomenti | Out-Null }
   catch { Errore "Permessi di amministratore negati."; exit 1 }
   exit 0
+}
+
+function Versione {
+  $f = Join-Path $Backend "app\version.py"
+  if ((Test-Path $f) -and ((Get-Content $f -Raw) -match 'APP_VERSION\s*=\s*"([^"]+)"')) { return $Matches[1] }
+  return "?"
+}
+
+# Impostazioni di questo PC: create alla prima installazione, mai sovrascritte dagli aggiornamenti
+function Prepara-ImpostazioniLocali {
+  if (Test-Path $Locali) { return }
+  # percorso scritto per esteso; con lettere accentate nel nome utente si lascia %USERPROFILE% (cmd non le legge bene)
+  $dati = if ($DatiDir -match '^[\x20-\x7E]+$') { $DatiDir } else { "%USERPROFILE%\GestionePazienti-dati" }
+  $testo = @(
+    "@rem Impostazioni di QUESTO PC (gli aggiornamenti non toccano questo file). Dopo una modifica: riavvia.cmd",
+    "@rem Cartella dei dati (database, backup, log): fuori dalla cartella del programma.",
+    "set PAZIENTI_DATA_DIR=$dati",
+    "@rem Per scaricare gli aggiornamenti da un repository GitHub privato serve un token di sola lettura:",
+    "@rem set PAZIENTI_GITHUB_TOKEN=github_pat_...",
+    "@rem Altre impostazioni di impostazioni.cmd si possono ridefinire qui (es. set PAZIENTI_PORTA=8080)."
+  )
+  Set-Content -Path $Locali -Value $testo -Encoding ascii
+  Ok "Creato windows\impostazioni-locali.cmd (dati in $DatiDir)"
 }
 
 function Attivita { return Get-ScheduledTask -TaskName $NomeAttivita -ErrorAction SilentlyContinue }
@@ -116,7 +145,8 @@ function Trova-Python {
 }
 
 function Installa {
-  Scrivi "== Installazione di Gestione Pazienti in $Progetto ==" Cyan
+  Scrivi "== Installazione di Gestione Pazienti $(Versione) in $Progetto ==" Cyan
+  Prepara-ImpostazioniLocali
   $py = @(Trova-Python)
   if ($py.Count -eq 0) {
     Errore "Python 3.10+ non trovato. Installalo da https://www.python.org/downloads/ (spunta 'Add python.exe to PATH') e riprova."
@@ -306,7 +336,8 @@ function Ferma {
 }
 
 function Stato {
-  Scrivi "== Gestione Pazienti ==" Cyan
+  Scrivi "== Gestione Pazienti $(Versione) ==" Cyan
+  Scrivi "   Dati: $DatiDir"
   if (Server-Risponde) { Ok "Server ACCESO: $Url" } else { Errore "Server SPENTO (porta $Porta)" }
   Mostra-PasswordIniziale
   $t = Attivita
@@ -322,6 +353,86 @@ function Stato {
   }
 }
 
+# --- aggiorna -----------------------------------------------------------------------------
+# Copia di sicurezza del database a server spento (file .db e, se presenti, -wal/-shm)
+function Backup-Database([string]$motivo) {
+  foreach ($dir in @($DatiDir, $VecchiDati)) {
+    $db = Join-Path $dir "pazienti.db"
+    if (-not (Test-Path $db)) { continue }
+    $dest = Join-Path $dir "backup"
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    $nome = "pazienti-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$motivo.db"
+    Copy-Item $db (Join-Path $dest $nome)
+    foreach ($ext in @("-wal", "-shm")) { if (Test-Path "$db$ext") { Copy-Item "$db$ext" (Join-Path $dest "$nome$ext") } }
+    Ok "Backup del database: $(Join-Path $dest $nome)"
+  }
+}
+
+function Scarica-Codice {
+  # 1) progetto scaricato con git: basta git pull
+  if ((Test-Path (Join-Path $Progetto ".git")) -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    Scrivi "Scarico l'ultima versione con git..."
+    & git -C $Progetto pull --ff-only | Out-Host      # Out-Host: l'output di git non deve diventare il valore restituito
+    if ($LASTEXITCODE -ne 0) {
+      Errore "git pull non riuscito. Se hai modificato dei file in questa cartella, controlla con: git -C `"$Progetto`" status"
+      return $false
+    }
+    return $true
+  }
+  # 2) progetto scaricato come zip: scarico l'ultima versione da GitHub e la copio sopra (dati esclusi)
+  if (-not $Imp.PAZIENTI_REPO) { Errore "Repository non impostato (PAZIENTI_REPO in impostazioni.cmd)."; return $false }
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $url = "https://api.github.com/repos/$($Imp.PAZIENTI_REPO)/zipball/$($Imp.PAZIENTI_RAMO)"
+  $headers = @{ "User-Agent" = "GestionePazienti"; "Accept" = "application/vnd.github+json" }
+  if ($Imp.PAZIENTI_GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $($Imp.PAZIENTI_GITHUB_TOKEN)" }
+  $tmp = Join-Path $env:TEMP "gestione-pazienti-aggiornamento"
+  if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  $zip = Join-Path $tmp "versione.zip"
+  Scrivi "Scarico l'ultima versione da GitHub ($($Imp.PAZIENTI_REPO))..."
+  try {
+    Invoke-WebRequest -Uri $url -Headers $headers -OutFile $zip -UseBasicParsing
+  } catch {
+    Errore "Download non riuscito: $($_.Exception.Message)"
+    Scrivi "  Se il repository e' privato serve un token: PAZIENTI_GITHUB_TOKEN in windows\impostazioni-locali.cmd (vedi README)." Yellow
+    return $false
+  }
+  Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "x") -Force
+  $src = Get-ChildItem (Join-Path $tmp "x") -Directory | Select-Object -First 1
+  if (-not $src -or -not (Test-Path (Join-Path $src.FullName "backend\app\version.py"))) { Errore "Il file scaricato non sembra Gestione Pazienti."; return $false }
+  Get-ChildItem -Recurse $src.FullName | Unblock-File
+  # copia il programma; NON tocca: dati, ambiente Python, librerie npm, impostazioni locali
+  & robocopy $src.FullName $Progetto /E /NFL /NDL /NJH /NJS /NP `
+      /XD (Join-Path $src.FullName "backend\data") (Join-Path $src.FullName "backend\.venv") (Join-Path $src.FullName "frontend\node_modules") `
+      /XF "impostazioni-locali.cmd" "impostazioni-locali.sh" | Out-Null
+  if ($LASTEXITCODE -ge 8) { Errore "Copia dei file non riuscita (robocopy $LASTEXITCODE)."; return $false }
+  # il frontend compilato va sostituito per intero (i nomi dei file cambiano a ogni versione)
+  & robocopy (Join-Path $src.FullName "frontend\dist") (Join-Path $Frontend "dist") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+  Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+  return $true
+}
+
+function Aggiorna {
+  $prima = Versione
+  Scrivi "== Aggiornamento di Gestione Pazienti (versione attuale $prima) ==" Cyan
+  Scrivi "   I dati restano in $DatiDir e non vengono toccati."
+  $eraAcceso = Server-Risponde
+  if ($eraAcceso -or (Processi-Porta).Count -gt 0) { Scrivi "Fermo il server..."; Ferma | Out-Null }
+  Backup-Database "pre-aggiornamento"
+  if (-not (Scarica-Codice)) {
+    if ($eraAcceso) { Avvia | Out-Null }
+    Fine 1
+  }
+  $dopo = Versione
+  if ($dopo -eq $prima) { Ok "Gia' all'ultima versione ($dopo): reinstallo comunque le librerie." } else { Ok "Scaricata la versione $dopo." }
+  # installazione e avvio con lo script NUOVO (potrebbe essere cambiato)
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath installa
+  if ($LASTEXITCODE -ne 0) { Errore "Installazione non completata: il database e' intatto, vedi i messaggi sopra."; Fine 1 }
+  if ($eraAcceso -or (Attivita)) { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath avvia }
+  Write-Host ""
+  Ok "Aggiornamento completato: $prima -> $dopo. Il database viene adattato alla nuova versione all'avvio (con backup automatico)."
+}
+
 function Apri-Firewall {
   Richiedi-Amministratore
   $nome = "Gestione Pazienti (TCP $Porta)"
@@ -332,7 +443,7 @@ function Apri-Firewall {
 }
 
 # con l'avvio automatico attivo il server gira come attivita' pianificata: per controllarla servono i permessi di amministratore
-if ($Azione -in @("avvia", "ferma", "riavvia") -and (Attivita) -and -not (E-Amministratore)) { Richiedi-Amministratore }
+if ($Azione -in @("avvia", "ferma", "riavvia", "aggiorna") -and (Attivita) -and -not (E-Amministratore)) { Richiedi-Amministratore }
 
 try {
   switch ($Azione) {
@@ -344,6 +455,7 @@ try {
     "riavvia"                    { Ferma | Out-Null; if (-not (Avvia)) { Fine 1 } }
     "stato"                      { Stato }
     "apri-firewall"              { Apri-Firewall }
+    "aggiorna"                   { Aggiorna }
   }
 } catch {
   Errore $_.Exception.Message

@@ -4,6 +4,7 @@ Sviluppo:    uvicorn app.main:app --reload            (frontend separato: cd fro
 Produzione:  python -m app --port 8000   (oppure gli script in windows/ e mac/)
              (dopo 'npm run build' il frontend compilato viene servito da qui, sullo stesso indirizzo)
 """
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -12,7 +13,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db as dbmod
+from . import backup, config, db as dbmod
+from .version import APP_VERSION
 from .errors import AppError, NotFound
 from .routers import admin, auth, vault
 
@@ -21,18 +23,39 @@ CSP = ("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';
        "connect-src 'self'; frame-ancestors 'none'; form-action 'self'")
 
 
+async def _daily_backups():
+    """Un backup del database al giorno (in <cartella dati>/backup, si tengono gli ultimi 30)."""
+    import asyncio
+    while True:
+        try:
+            saved = await asyncio.to_thread(backup.daily_backup_if_due)
+            if saved:
+                print(f"Backup giornaliero: {saved}", flush=True)
+        except Exception as exc:          # un backup fallito non deve fermare il server
+            print(f"Backup giornaliero non riuscito: {exc}", flush=True)
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """All'avvio: crea tabelle, cataloghi e (database vuoto) l'amministratore di seed."""
+    """All'avvio: sposta i dati dalla vecchia posizione, aggiorna il database, crea l'admin iniziale."""
+    import asyncio
+    moved = dbmod.move_legacy_data()
+    if moved:
+        print(f"Dati spostati da backend/data a {moved}", flush=True)
+    print(f"Gestione Pazienti {APP_VERSION} - dati in {os.path.dirname(config.DB_PATH)}", flush=True)
     if dbmod.init_db():
         where = (f"la password iniziale è nel file\n  {config.seed_password_file()}"
                  if os.path.exists(config.seed_password_file()) else "con la password di PAZIENTI_ADMIN_PASSWORD")
         print("\n" + "=" * 64 + f"\n  Creato l'amministratore {config.SEED_ADMIN_EMAIL}:\n  {where}"
               "\n  Va cambiata al primo accesso.\n" + "=" * 64 + "\n", flush=True)
+    task = asyncio.create_task(_daily_backups()) if config.BACKUP_ENABLED else None
     yield
+    if task:
+        task.cancel()
 
 
-app = FastAPI(title="Gestione Pazienti", version="3.0", lifespan=lifespan,
+app = FastAPI(title="Gestione Pazienti", version=APP_VERSION, lifespan=lifespan,
               docs_url="/api/docs" if config.API_DOCS else None, redoc_url=None,
               openapi_url="/api/openapi.json" if config.API_DOCS else None)
 
@@ -82,6 +105,12 @@ for module in (auth, vault, admin):
 # ---------------------------------------------------------------------------
 # Frontend React compilato (frontend/dist), se presente
 # ---------------------------------------------------------------------------
+# Tipi corretti per i file del frontend: su alcuni Windows il registro associa .js a text/plain
+# e il browser (con X-Content-Type-Options: nosniff) rifiuterebbe gli script e il lettore PDF.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
+
 DIST = os.path.realpath(config.FRONTEND_DIST)
 if os.path.isdir(DIST):
     if os.path.isdir(os.path.join(DIST, "assets")):

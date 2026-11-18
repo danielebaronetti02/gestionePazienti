@@ -11,6 +11,8 @@ import { ChangePasswordPage, InsecureContextPage, LoginPage, PendingAccessPage, 
 import { DashboardPage } from "./pages/Dashboard";
 import { ExamEditPage, ExamsPage } from "./pages/Exams";
 import { ExportPage } from "./pages/Export";
+import { ImportPage } from "./pages/Import";
+import { PrintPage } from "./pages/Print";
 import { PatientDetailPage } from "./pages/PatientDetail";
 import { PatientFormPage } from "./pages/PatientForm";
 import { PatientsPage } from "./pages/Patients";
@@ -24,6 +26,8 @@ const ROUTES = [
   { path: "/pazienti/nuovo", page: PatientFormPage, allow: (u) => u.can_edit && u.can_view_identity },
   { path: "/pazienti/:code", page: PatientDetailPage },
   { path: "/pazienti/:code/modifica", page: PatientFormPage, allow: (u) => u.can_edit },
+  { path: "/pazienti/:code/importa", page: ImportPage, allow: (u) => u.can_edit },
+  { path: "/pazienti/:code/stampa", page: PrintPage },
   { path: "/esami", page: ExamsPage },
   { path: "/esami/:id", page: ExamEditPage },
   { path: "/esporta", page: ExportPage, allow: (u) => u.can_edit },

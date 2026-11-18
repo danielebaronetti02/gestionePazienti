@@ -1,5 +1,5 @@
 // Scheda paziente: anagrafica, dati clinici, esami, andamenti, storico visite.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../appContext";
 import { ConfirmButton, Count } from "../components/common";
@@ -9,7 +9,7 @@ import { examTrends, patientExams, patientVisits } from "../domain";
 import { age, itDate, todayIso } from "../format";
 import { useAction } from "../hooks";
 import { Link, useRouter } from "../router";
-import { addExams, addVisit, logEvent, updatePatient } from "../vault";
+import { addExams, addVisit, deletePatient, logEvent, updatePatient } from "../vault";
 
 function Identity({ p }) {
   if (!p.identity) {
@@ -35,6 +35,9 @@ function Identity({ p }) {
 }
 
 function PrescribeForm({ patientId, open, onDone }) {
+  // aperto all'inizio se non ci sono esami; poi lo decide l'utente (non va richiuso a ogni ricarica dei dati)
+  const detailsRef = useRef(null);
+  useEffect(() => { if (open && detailsRef.current) detailsRef.current.open = true; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { meta, keys, flash } = useApp();
   const [selected, setSelected] = useState([]);
   const [f, setF] = useState({ prescribed_date: todayIso(), expected_date: "", notes: "" });
@@ -64,7 +67,7 @@ function PrescribeForm({ patientId, open, onDone }) {
   };
 
   return (
-    <details className="prescribe" open={open}>
+    <details className="prescribe" ref={detailsRef}>
       <summary className="btn primary">+ Prescrivi esami</summary>
       <form onSubmit={submit}>
         <div className="exam-picker">
@@ -140,7 +143,7 @@ function VisitForm({ patientId, onDone }) {
 
 export function PatientDetailPage({ params }) {
   const { user, meta, vault, keys, reloadVault, flash } = useApp();
-  const { hash } = useRouter();
+  const { hash, navigate } = useRouter();
   const p = vault.patientsByCode.get(params.code.toUpperCase());
   const exams = useMemo(() => (p ? patientExams(vault, meta, p.id) : []), [vault, meta, p]);
   const visits = useMemo(() => (p ? patientVisits(vault, p.id) : []), [vault, p]);
@@ -163,6 +166,22 @@ export function PatientDetailPage({ params }) {
       await updatePatient(keys, p.id, { ...p.clinical, archived }, null, archived ? "archivia_paziente" : "ripristina_paziente");
       await reloadVault();
       flash(archived ? "Paziente archiviato." : "Paziente ripristinato.");
+    } catch (err) {
+      flash(err.message, "error");
+    }
+  };
+  const removePatient = async () => {
+    const typed = window.prompt(
+      `Eliminare DEFINITIVAMENTE il paziente ${p.code}${p.identity ? ` (${p.identity.last_name} ${p.identity.first_name})` : ""}`
+      + ` con ${exams.length} esami e ${visits.length} visite?\n\nNon si può annullare (resta solo nei backup).`
+      + `\nPer confermare scrivi il codice del paziente: ${p.code}`);
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== p.code) { flash("Codice non corrispondente: paziente NON eliminato.", "error"); return; }
+    try {
+      await deletePatient(p.id);
+      await reloadVault();
+      flash(`Paziente ${p.code} eliminato.`);
+      navigate("/pazienti");
     } catch (err) {
       flash(err.message, "error");
     }
@@ -193,16 +212,19 @@ export function PatientDetailPage({ params }) {
                 {p.error && <span className="badge b-overdue">Dati non decifrabili</span>}
               </div>
             </div>
-            {user.can_edit && (
-              <div className="btn-row">
-                <Link className="btn" to={`/pazienti/${p.code}/modifica`}>Modifica scheda</Link>
-                <ConfirmButton className="btn ghost" onConfirm={toggleArchive}
-                  message={p.clinical.archived ? "Ripristinare il paziente tra quelli in carico?"
-                    : "Archiviare il paziente? Non comparirà più in dashboard e negli elenchi (i dati restano conservati)."}>
-                  {p.clinical.archived ? "Ripristina" : "Archivia"}
-                </ConfirmButton>
-              </div>
-            )}
+            <div className="btn-row">
+              <Link className="btn" to={`/pazienti/${p.code}/stampa`}>🖨 Stampa / PDF</Link>
+              {user.can_edit && (
+                <>
+                  <Link className="btn" to={`/pazienti/${p.code}/modifica`}>Modifica scheda</Link>
+                  <ConfirmButton className="btn ghost" onConfirm={toggleArchive}
+                    message={p.clinical.archived ? "Ripristinare il paziente tra quelli in carico?"
+                      : "Archiviare il paziente? Non comparirà più in dashboard e negli elenchi (i dati restano conservati)."}>
+                    {p.clinical.archived ? "Ripristina" : "Archivia"}
+                  </ConfirmButton>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="grid-2">
@@ -225,7 +247,10 @@ export function PatientDetailPage({ params }) {
           </div>
 
           <section className="card" id="esami">
-            <div className="card-head"><h2>Esami</h2></div>
+            <div className="card-head">
+              <h2>Esami</h2>
+              {user.can_edit && <Link className="btn" to={`/pazienti/${p.code}/importa`}>📄 Importa da PDF o foto</Link>}
+            </div>
             {user.can_edit && <PrescribeForm patientId={p.id} open={!exams.length} onDone={reloadVault} />}
             <ExamTable exams={exams} showPatient={false} back={`/pazienti/${p.code}#esami`} />
           </section>
@@ -264,6 +289,13 @@ export function PatientDetailPage({ params }) {
               <p className="empty">Nessuna visita registrata.</p>
             )}
           </section>
+
+          {user.is_admin && (
+            <div className="danger-zone">
+              <button type="button" className="btn danger small" onClick={removePatient}>Elimina paziente</button>
+              <span className="muted"> Solo amministratori: elimina scheda, esami e visite. Per toglierlo solo dagli elenchi usa “Archivia”.</span>
+            </div>
+          )}
         </>
   );
 }

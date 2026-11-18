@@ -61,7 +61,18 @@ def set_pathology_active(pathology_id: int, body: ActiveIn, ctx: Context = Depen
 
 @router.post("/exam-types", status_code=201)
 def add_exam_type(body: ExamTypeIn, ctx: Context = Depends(user_ctx)):
-    admin.add_exam_type(ctx, body.model_dump())
+    return {"id": admin.add_exam_type(ctx, body.model_dump())}
+
+
+@router.delete("/exam-types/{type_id}")
+def delete_exam_type(type_id: int, ctx: Context = Depends(user_ctx)):
+    admin.delete_exam_type(ctx, type_id)
+    return {"ok": True}
+
+
+@router.delete("/pathologies/{pathology_id}")
+def delete_pathology(pathology_id: int, ctx: Context = Depends(user_ctx)):
+    admin.delete_pathology(ctx, pathology_id)
     return {"ok": True}
 
 

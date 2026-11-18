@@ -1,3 +1,7 @@
+-- Schema del database: descrive SEMPRE l'ultima versione (database nuovi).
+-- I database creati con versioni precedenti vengono aggiornati da app/migrations.py,
+-- con un backup automatico prima di ogni modifica. Ad ogni cambio di questo file
+-- va aggiunta la migrazione corrispondente e aumentato SCHEMA_VERSION in app/version.py.
 -- Schema "Gestione Pazienti" (SQLite) – archivio a conoscenza zero.
 -- I dati dei pazienti sono salvati SOLO cifrati (colonne enc_*, formato "v1.<base64>"):
 -- vengono cifrati e decifrati nel browser, il server non possiede le chiavi.
@@ -48,7 +52,9 @@ CREATE TABLE IF NOT EXISTS exam_types (
     name     TEXT NOT NULL UNIQUE,
     category TEXT NOT NULL DEFAULT 'Altro',
     unit     TEXT,
-    active   INTEGER NOT NULL DEFAULT 1
+    active   INTEGER NOT NULL DEFAULT 1,
+    code     TEXT,                 -- codice del nomenclatore (es. 90.42.1), per l'importazione delle ricette
+    aliases  TEXT                  -- sinonimi separati da "|" (es. "glucosio|glicemia"), per l'importazione dei referti
 );
 
 -- Pazienti: in chiaro solo il codice pseudonimo; anagrafica e dati clinici cifrati

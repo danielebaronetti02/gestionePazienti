@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends
 
 from ..context import Context
 from ..deps import user_ctx
-from ..schemas import BlobIn, EventIn, ExamsIn, PatientCreateIn, PatientUpdateIn
-from ..services import vault
+from ..schemas import BlobIn, EventIn, ExamsIn, OcrIn, PatientCreateIn, PatientUpdateIn
+from ..services import ocr as ocr_service, vault
 
 router = APIRouter(prefix="/api", tags=["archivio"])
 
@@ -28,6 +28,17 @@ def create_patient(body: PatientCreateIn, ctx: Context = Depends(user_ctx)):
 def update_patient(patient_id: int, body: PatientUpdateIn, ctx: Context = Depends(user_ctx)):
     vault.update_patient(ctx, patient_id, body.model_dump())
     return {"ok": True}
+
+
+@router.delete("/patients/{patient_id}")
+def delete_patient(patient_id: int, ctx: Context = Depends(user_ctx)):
+    vault.delete_patient(ctx, patient_id)
+    return {"ok": True}
+
+
+@router.post("/ocr")
+def ocr(body: OcrIn, ctx: Context = Depends(user_ctx)):
+    return ocr_service.read_image(ctx, body.image_b64)
 
 
 @router.post("/patients/{patient_id}/exams", status_code=201)

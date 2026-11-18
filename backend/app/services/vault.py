@@ -12,7 +12,8 @@ from .common import check_blob, check_index
 
 # Eventi che il browser può registrare (aperture e esportazioni avvengono lato client)
 CLIENT_EVENTS = {"apertura_scheda", "apertura_scheda_con_anagrafica", "esportazione_excel",
-                 "esportazione_excel_con_anagrafica", "ricerca_pazienti"}
+                 "esportazione_excel_con_anagrafica", "ricerca_pazienti",
+                 "importa_prescrizione", "importa_referto", "stampa_scheda"}
 
 
 def meta(ctx) -> dict:
@@ -21,7 +22,7 @@ def meta(ctx) -> dict:
     return {
         "statuses": STATUS, "roles": ROLES, "sexes": SEXES, "visit_types": VISIT_TYPES,
         "pathologies": [dict(r) for r in db.execute("SELECT id, name, active FROM pathologies ORDER BY name")],
-        "exam_types": [dict(r) for r in db.execute("SELECT id, name, category, unit, active FROM exam_types ORDER BY category, name")],
+        "exam_types": [dict(r) for r in db.execute("SELECT id, name, category, unit, active, code, aliases FROM exam_types ORDER BY category, name")],
         "users": [dict(r) for r in db.execute("SELECT id, full_name FROM users ORDER BY full_name")],
     }
 
@@ -158,6 +159,20 @@ def delete_exam(ctx, exam_id: int):
     e = _exam(db, exam_id)
     db.execute("DELETE FROM exams WHERE id = ?", (exam_id,))
     audit(ctx, "elimina_esame", e["code"])
+    db.commit()
+
+
+def delete_patient(ctx, patient_id: int):
+    """Solo admin: elimina il paziente con tutti i suoi esami e visite (a cascata)."""
+    ctx.require_admin()
+    db = ctx.db
+    p = db.execute("SELECT code FROM patients WHERE id = ?", (patient_id,)).fetchone()
+    if p is None:
+        raise NotFound("Paziente non trovato.")
+    n_exams = db.execute("SELECT COUNT(*) FROM exams WHERE patient_id = ?", (patient_id,)).fetchone()[0]
+    n_visits = db.execute("SELECT COUNT(*) FROM visits WHERE patient_id = ?", (patient_id,)).fetchone()[0]
+    db.execute("DELETE FROM patients WHERE id = ?", (patient_id,))
+    audit(ctx, "elimina_paziente", p["code"], details=f"{n_exams} esami, {n_visits} visite")
     db.commit()
 
 

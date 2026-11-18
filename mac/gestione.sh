@@ -1,6 +1,6 @@
 #!/bin/bash
 # Gestione Pazienti - installazione e controllo del server su macOS.
-#   gestione.sh installa | attiva-avvio-automatico | disattiva-avvio-automatico | avvia | ferma | riavvia | stato
+#   gestione.sh installa | attiva-avvio-automatico | disattiva-avvio-automatico | avvia | ferma | riavvia | stato | aggiorna
 # (oppure doppio clic sui file .command della stessa cartella)
 
 AZIONE="${1:-stato}"
@@ -14,7 +14,9 @@ PLIST="$HOME/Library/LaunchAgents/$ETICHETTA.plist"
 DOMINIO="gui/$(id -u)"
 source "$CARTELLA/impostazioni.sh"
 PORTA="${PAZIENTI_PORTA:-8000}"
-DATI="${PAZIENTI_DATA_DIR:-$BACKEND/data}"
+DATI="$PAZIENTI_DATA_DIR"
+VECCHI_DATI="$BACKEND/data"            # posizione dei dati fino alla versione 3.0
+LOCALI="$CARTELLA/impostazioni-locali.sh"
 LOG="$DATI/server.log"
 PIDFILE="$DATI/server.pid"
 URL="http://localhost:$PORTA"
@@ -47,6 +49,20 @@ controlla_cartella() {
   return 0
 }
 
+versione() { sed -n 's/^APP_VERSION *= *"\(.*\)"/\1/p' "$BACKEND/app/version.py" 2>/dev/null || echo "?"; }
+
+prepara_impostazioni_locali() {
+  [ -f "$LOCALI" ] && return 0
+  cat > "$LOCALI" <<IMP
+# Impostazioni di QUESTO Mac (gli aggiornamenti non toccano questo file). Dopo una modifica: riavvia.command
+# Cartella dei dati (database, backup, log): fuori dalla cartella del programma.
+export PAZIENTI_DATA_DIR="$DATI"
+# Per scaricare gli aggiornamenti da un repository GitHub privato serve un token di sola lettura:
+# PAZIENTI_GITHUB_TOKEN=github_pat_...
+IMP
+  verde "Creato mac/impostazioni-locali.sh (dati in $DATI)"
+}
+
 trova_python() {
   for c in python3.13 python3.12 python3.11 python3.14 python3.10 python3; do
     command -v "$c" >/dev/null 2>&1 || continue
@@ -56,7 +72,8 @@ trova_python() {
 }
 
 installa() {
-  echo "== Installazione di Gestione Pazienti in $PROGETTO =="
+  echo "== Installazione di Gestione Pazienti $(versione) in $PROGETTO =="
+  prepara_impostazioni_locali
   PY="$(trova_python)" || { rosso "Python 3.10+ non trovato. Installa Python 3.13 da https://www.python.org/downloads/macos/ e riprova."; exit 1; }
   verde "Python: $($PY --version)"
   local acceso=0; risponde && acceso=1 && { echo "Il server e' acceso: lo fermo per aggiornarlo..."; ferma >/dev/null; }
@@ -177,11 +194,70 @@ ferma() {
 }
 
 stato() {
-  echo "== Gestione Pazienti =="
+  echo "== Gestione Pazienti $(versione) =="
+  echo "   Dati: $DATI"
   if risponde; then verde "Server ACCESO: $URL"; else rosso "Server SPENTO (porta $PORTA)"; fi
   mostra_password_iniziale
   if [ -f "$PLIST" ]; then verde "Avvio automatico ATTIVO ($PLIST)"; else giallo "Avvio automatico NON attivo (attivalo con attiva-avvio-automatico.command)"; fi
   [ -f "$LOG" ] && { echo "Ultime righe del log ($LOG):"; tail -n 8 "$LOG" | sed 's/^/      /'; }
+}
+
+backup_database() {
+  for dir in "$DATI" "$VECCHI_DATI"; do
+    [ -f "$dir/pazienti.db" ] || continue
+    mkdir -p "$dir/backup"
+    local nome="pazienti-$(date +%Y%m%d-%H%M%S)-$1.db"
+    cp "$dir/pazienti.db" "$dir/backup/$nome"
+    for ext in -wal -shm; do [ -f "$dir/pazienti.db$ext" ] && cp "$dir/pazienti.db$ext" "$dir/backup/$nome$ext"; done
+    verde "Backup del database: $dir/backup/$nome"
+  done
+}
+
+scarica_codice() {
+  if [ -d "$PROGETTO/.git" ] && command -v git >/dev/null 2>&1; then
+    echo "Scarico l'ultima versione con git..."
+    git -C "$PROGETTO" pull --ff-only || { rosso "git pull non riuscito: se hai modificato dei file, controlla con  git -C \"$PROGETTO\" status"; return 1; }
+    return 0
+  fi
+  [ -n "$PAZIENTI_REPO" ] || { rosso "Repository non impostato (PAZIENTI_REPO in mac/impostazioni.sh)."; return 1; }
+  local tmp; tmp="$(mktemp -d)"
+  local auth=(); [ -n "$PAZIENTI_GITHUB_TOKEN" ] && auth=(-H "Authorization: Bearer $PAZIENTI_GITHUB_TOKEN")
+  echo "Scarico l'ultima versione da GitHub ($PAZIENTI_REPO)..."
+  if ! curl -fsSL "${auth[@]}" -H "Accept: application/vnd.github+json" -o "$tmp/versione.zip" \
+       "https://api.github.com/repos/$PAZIENTI_REPO/zipball/${PAZIENTI_RAMO:-main}"; then
+    rosso "Download non riuscito. Se il repository è privato serve PAZIENTI_GITHUB_TOKEN in mac/impostazioni-locali.sh (vedi README)."
+    rm -rf "$tmp"; return 1
+  fi
+  unzip -q "$tmp/versione.zip" -d "$tmp/x" || { rosso "Il file scaricato è danneggiato."; rm -rf "$tmp"; return 1; }
+  local src; src="$(find "$tmp/x" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  [ -f "$src/backend/app/version.py" ] || { rosso "Il file scaricato non sembra Gestione Pazienti."; rm -rf "$tmp"; return 1; }
+  # copia il programma; NON tocca: dati, ambiente Python, librerie npm, impostazioni locali
+  if ! tar -C "$src" --exclude './backend/data' --exclude './backend/.venv' --exclude './frontend/node_modules' \
+           --exclude './frontend/dist' --exclude '*/impostazioni-locali.sh' --exclude '*/impostazioni-locali.cmd' -cf - . \
+       | tar -C "$PROGETTO" -xf -; then
+    rosso "Copia dei file non riuscita."; rm -rf "$tmp"; return 1
+  fi
+  # frontend compilato: sostituito per intero (i nomi dei file cambiano a ogni versione)
+  rm -rf "$FRONTEND/dist" && cp -R "$src/frontend/dist" "$FRONTEND/dist" || { rosso "Copia del frontend non riuscita."; rm -rf "$tmp"; return 1; }
+  xattr -dr com.apple.quarantine "$PROGETTO" 2>/dev/null
+  chmod +x "$CARTELLA"/*.sh "$CARTELLA"/*.command 2>/dev/null
+  rm -rf "$tmp"
+}
+
+aggiorna() {
+  local prima; prima="$(versione)"
+  echo "== Aggiornamento di Gestione Pazienti (versione attuale $prima) =="
+  echo "   I dati restano in $DATI e non vengono toccati."
+  local acceso=0; risponde && acceso=1
+  [ $acceso = 1 ] || [ -n "$(pid_porta)" ] && { echo "Fermo il server..."; ferma >/dev/null; }
+  backup_database "pre-aggiornamento"
+  if ! scarica_codice; then [ $acceso = 1 ] && avvia >/dev/null; exit 1; fi
+  local dopo; dopo="$(versione)"
+  [ "$dopo" = "$prima" ] && verde "Già all'ultima versione ($dopo): reinstallo comunque le librerie." || verde "Scaricata la versione $dopo."
+  # installazione e avvio con lo script NUOVO (potrebbe essere cambiato)
+  /bin/bash "$CARTELLA/gestione.sh" installa || { rosso "Installazione non completata: il database è intatto, vedi i messaggi sopra."; exit 1; }
+  if [ $acceso = 1 ] || [ -f "$PLIST" ]; then /bin/bash "$CARTELLA/gestione.sh" avvia; fi
+  echo; verde "Aggiornamento completato: $prima -> $dopo. Il database viene adattato alla nuova versione all'avvio (con backup automatico)."
 }
 
 case "$AZIONE" in
@@ -192,5 +268,6 @@ case "$AZIONE" in
   ferma) ferma ;;
   riavvia) ferma >/dev/null; avvia ;;
   stato) stato ;;
-  *) echo "Uso: $0 installa|attiva-avvio-automatico|disattiva-avvio-automatico|avvia|ferma|riavvia|stato"; exit 2 ;;
+  aggiorna) aggiorna ;;
+  *) echo "Uso: $0 installa|attiva-avvio-automatico|disattiva-avvio-automatico|avvia|ferma|riavvia|stato|aggiorna"; exit 2 ;;
 esac

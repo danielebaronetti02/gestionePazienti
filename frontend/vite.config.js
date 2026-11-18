@@ -8,5 +8,7 @@ export default defineConfig({
     port: 5173,
     proxy: { "/api": "http://127.0.0.1:8000" },
   },
-  build: { outDir: "dist", sourcemap: false },
+  // es2022: richiesto da pdf.js (lettura dei PDF). Browser supportati: Chrome/Edge 94+, Firefox 93+, Safari 15.4+
+  build: { outDir: "dist", sourcemap: false, target: "es2022" },
+  optimizeDeps: { esbuildOptions: { target: "es2022" } },
 });

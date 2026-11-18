@@ -3,4 +3,7 @@ backend/.venv/
 __pycache__/
 .pytest_cache/
 frontend/node_modules/
-# frontend/dist/ e' incluso (compilato) così il server non richiede Node.js
+# frontend/dist/ è incluso (compilato) così il server non richiede Node.js
+# impostazioni di ogni singolo PC: non vanno nel repository
+windows/impostazioni-locali.cmd
+mac/impostazioni-locali.sh

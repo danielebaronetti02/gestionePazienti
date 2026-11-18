@@ -145,7 +145,7 @@ export async function loadVault(keys, opening = false) {
 // ---------------------------------------------------------------------------
 const CLINICAL_FIELDS = ["sex", "pathology_id", "diagnosis_date", "notes", "archived"];
 const EXAM_FIELDS = ["exam_type_id", "prescribed_date", "expected_date", "delivered_date", "result_date",
-                     "status", "result_value", "result_unit", "notes"];
+                     "status", "result_value", "result_unit", "reference_range", "out_of_range", "notes", "source"];
 const pick = (obj, fields) => Object.fromEntries(fields.map((f) => [f, obj[f] ?? null]));
 
 export async function createPatient(keys, identity, clinical) {
@@ -164,6 +164,11 @@ export async function updatePatient(keys, patientId, clinical, identity = null, 
     body.tax_code_idx = await taxCodeIndex(keys.identity, identity.tax_code);
   }
   return api.put(`/api/patients/${patientId}`, body);
+}
+
+/** Solo amministratori: elimina il paziente con tutti i suoi esami e visite. */
+export function deletePatient(patientId) {
+  return api.del(`/api/patients/${patientId}`);
 }
 
 export async function addExams(keys, patientId, exams) {

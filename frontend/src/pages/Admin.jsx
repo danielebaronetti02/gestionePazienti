@@ -271,39 +271,66 @@ export function UserFormPage({ params }) {
 // ---------------------------------------------------------------------------
 // Cataloghi
 // ---------------------------------------------------------------------------
-function ExamTypeRow({ t, onChange }) {
-  const [category, setCategory] = useState(t.category);
-  const [unit, setUnit] = useState(t.unit || "");
+function ExamTypeRow({ t, uses, onChange, onDelete }) {
+  const [f, setF] = useState({ category: t.category, unit: t.unit || "", code: t.code || "", aliases: (t.aliases || "").replaceAll("|", ", ") });
+  const [open, setOpen] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
-    <tr className={t.active ? undefined : "row-archived"}>
-      <td>{t.name}</td>
-      <td>
-        <form className="inline-form tight" onSubmit={(e) => { e.preventDefault(); onChange(t.id, { category, unit }); }}>
-          <input value={category} onChange={(e) => setCategory(e.target.value)} size={14} />
-          <input value={unit} onChange={(e) => setUnit(e.target.value)} size={6} placeholder="unità" />
-          <button className="btn small ghost" title="Salva">✓</button>
-        </form>
-      </td>
-      <td>{t.uses}</td>
-      <td className="right">
-        <button type="button" className="btn small ghost" onClick={() => onChange(t.id, { active: !t.active })}>
-          {t.active ? "Disattiva" : "Riattiva"}
-        </button>
-      </td>
-    </tr>
+    <>
+      <tr className={t.active ? undefined : "row-archived"}>
+        <td>
+          <strong>{t.name}</strong>
+          <div className="sub">{t.category}{t.unit ? ` · ${t.unit}` : ""}{t.code ? ` · cod. ${t.code}` : ""}</div>
+        </td>
+        <td>{uses}</td>
+        <td className="right nowrap">
+          <button type="button" className="btn small ghost" onClick={() => setOpen(!open)}>{open ? "Chiudi" : "Modifica"}</button>{" "}
+          <button type="button" className="btn small ghost" onClick={() => onChange(t.id, { active: !t.active })}>
+            {t.active ? "Disattiva" : "Riattiva"}
+          </button>{" "}
+          <button type="button" className="btn small danger" disabled={uses > 0} onClick={() => onDelete(t)}
+                  title={uses > 0 ? `Usato da ${uses} esami: puoi solo disattivarlo` : "Elimina dal catalogo"}>
+            Elimina
+          </button>
+        </td>
+      </tr>
+      {open && (
+        <tr className="row-edit">
+          <td colSpan={3}>
+            <form className="form-grid" onSubmit={(e) => { e.preventDefault(); onChange(t.id, f); setOpen(false); }}>
+              <label>Categoria<input value={f.category} onChange={set("category")} /></label>
+              <label>Unità<input value={f.unit} onChange={set("unit")} /></label>
+              <label>Codice nomenclatore<input value={f.code} onChange={set("code")} placeholder="es. 90.42.1" /></label>
+              <label className="span-3">Sinonimi (per riconoscerlo nei referti, separati da virgola)
+                <input value={f.aliases} onChange={set("aliases")} placeholder="es. glucosio, glicemia a digiuno" />
+              </label>
+              <div className="actions"><button className="btn small primary">Salva</button></div>
+            </form>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
 export function CatalogsPage() {
-  const { flash, reloadMeta } = useApp();
+  const { flash, reloadMeta, vault } = useApp();
   const state = useApi("/api/admin/catalogs");
   const [newPath, setNewPath] = useState("");
-  const [newExam, setNewExam] = useState({ name: "", category: "", unit: "" });
+  const [newExam, setNewExam] = useState({ name: "", category: "", unit: "", code: "" });
+  const [filter, setFilter] = useState("");
 
-  const act = async (fn, after) => {
+  // quante volte è usata ogni voce: lo sa solo il browser (i dati clinici sul server sono cifrati)
+  const pathologyUses = new Map();
+  for (const p of vault.patients) pathologyUses.set(p.clinical.pathology_id, (pathologyUses.get(p.clinical.pathology_id) || 0) + 1);
+  const examUses = new Map();
+  for (const e of vault.exams) examUses.set(e.exam_type_id, (examUses.get(e.exam_type_id) || 0) + 1);
+  const undecryptable = vault.patients.some((p) => p.error) || vault.exams.some((e) => e.error);
+
+  const act = async (fn, after, message = "Catalogo aggiornato.") => {
     try {
       await fn();
-      flash("Catalogo aggiornato.");
+      flash(message);
       after?.();
       state.reload();
       reloadMeta();
@@ -311,11 +338,20 @@ export function CatalogsPage() {
       flash(err.message, "error");
     }
   };
+  const remove = (kind, item) => {
+    if (undecryptable) { flash("Alcuni dati non sono decifrabili: impossibile verificare che la voce non sia usata.", "error"); return; }
+    if (!window.confirm(`Eliminare definitivamente “${item.name}” dal catalogo?`)) return;
+    act(() => api.del(`/api/admin/${kind}/${item.id}`), null, `“${item.name}” eliminato dal catalogo.`);
+  };
+  const match = (text) => !filter || text.toLowerCase().includes(filter.toLowerCase());
 
   return (
     <>
       <h1>Cataloghi</h1>
-      <p className="muted">Le voci disattivate non compaiono più nei menu di scelta, ma restano sui pazienti/esami già registrati.</p>
+      <p className="muted">
+        Le voci <strong>disattivate</strong> non compaiono più nei menu di scelta ma restano sui pazienti ed esami già registrati.
+        Si possono <strong>eliminare</strong> solo le voci mai usate.
+      </p>
       <Async state={state}>
         {(c) => (
           <div className="grid-2">
@@ -324,18 +360,25 @@ export function CatalogsPage() {
               <table className="table compact">
                 <thead><tr><th>Nome</th><th>Pazienti</th><th /></tr></thead>
                 <tbody>
-                  {c.pathologies.map((p) => (
-                    <tr key={p.id} className={p.active ? undefined : "row-archived"}>
-                      <td>{p.name}</td>
-                      <td>{p.uses}</td>
-                      <td className="right">
-                        <button type="button" className="btn small ghost"
-                                onClick={() => act(() => api.patch(`/api/admin/pathologies/${p.id}`, { active: !p.active }))}>
-                          {p.active ? "Disattiva" : "Riattiva"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {c.pathologies.map((p) => {
+                    const uses = pathologyUses.get(p.id) || 0;
+                    return (
+                      <tr key={p.id} className={p.active ? undefined : "row-archived"}>
+                        <td>{p.name}</td>
+                        <td>{uses}</td>
+                        <td className="right nowrap">
+                          <button type="button" className="btn small ghost"
+                                  onClick={() => act(() => api.patch(`/api/admin/pathologies/${p.id}`, { active: !p.active }))}>
+                            {p.active ? "Disattiva" : "Riattiva"}
+                          </button>{" "}
+                          <button type="button" className="btn small danger" disabled={uses > 0} onClick={() => remove("pathologies", p)}
+                                  title={uses > 0 ? `Assegnata a ${uses} pazienti: puoi solo disattivarla` : "Elimina dal catalogo"}>
+                            Elimina
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               <form className="inline-form"
@@ -347,23 +390,27 @@ export function CatalogsPage() {
 
             <section className="card">
               <h2>Esami prescrivibili</h2>
+              <input className="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Cerca esame…" />
               <table className="table compact">
-                <thead><tr><th>Esame</th><th>Categoria · Unità</th><th>Usi</th><th /></tr></thead>
+                <thead><tr><th>Esame</th><th>Usi</th><th /></tr></thead>
                 <tbody>
-                  {c.exam_types.map((t) => (
-                    <ExamTypeRow key={`${t.id}-${t.category}-${t.unit}-${t.active}`} t={t}
-                                 onChange={(id, body) => act(() => api.patch(`/api/admin/exam-types/${id}`, body))} />
+                  {c.exam_types.filter((t) => match(`${t.name} ${t.category} ${t.aliases || ""} ${t.code || ""}`)).map((t) => (
+                    <ExamTypeRow key={`${t.id}-${t.category}-${t.unit}-${t.active}-${t.code}-${t.aliases}`} t={t}
+                                 uses={examUses.get(t.id) || 0}
+                                 onChange={(id, body) => act(() => api.patch(`/api/admin/exam-types/${id}`, body))}
+                                 onDelete={(x) => remove("exam-types", x)} />
                   ))}
                 </tbody>
               </table>
               <form className="inline-form"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      act(() => api.post("/api/admin/exam-types", newExam), () => setNewExam({ name: "", category: "", unit: "" }));
+                      act(() => api.post("/api/admin/exam-types", newExam), () => setNewExam({ name: "", category: "", unit: "", code: "" }));
                     }}>
                 <input value={newExam.name} onChange={(e) => setNewExam({ ...newExam, name: e.target.value })} placeholder="Nome esame" required />
                 <input value={newExam.category} onChange={(e) => setNewExam({ ...newExam, category: e.target.value })} placeholder="Categoria" size={14} />
                 <input value={newExam.unit} onChange={(e) => setNewExam({ ...newExam, unit: e.target.value })} placeholder="Unità" size={6} />
+                <input value={newExam.code} onChange={(e) => setNewExam({ ...newExam, code: e.target.value })} placeholder="Codice" size={8} />
                 <button className="btn">Aggiungi</button>
               </form>
             </section>

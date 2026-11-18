@@ -5,6 +5,8 @@ from ..db import get_state, remove_seed_password_file, set_state
 from ..errors import Forbidden, Invalid, TooManyRequests, Unauthorized
 from ..security import audit
 from ..utils import now
+from ..version import APP_VERSION
+from .ocr import available as ocr_available
 from .common import check_b64, check_grants, save_grants
 
 
@@ -17,6 +19,8 @@ def public_config() -> dict:
         "session_minutes": config.SESSION_MINUTES,
         "min_password_len": config.MIN_PASSWORD_LEN,
         "temp_password_hours": config.TEMP_PASSWORD_HOURS,
+        "version": APP_VERSION,
+        "ocr_available": ocr_available(),
     }
 
 

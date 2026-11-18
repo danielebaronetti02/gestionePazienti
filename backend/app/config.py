@@ -5,7 +5,9 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(APP_DIR)
 PROJECT_DIR = os.path.dirname(BACKEND_DIR)
 
-DATA_DIR = os.environ.get("PAZIENTI_DATA_DIR", os.path.join(BACKEND_DIR, "data"))
+# I dati stanno FUORI dalla cartella del programma: aggiornare o riscaricare il programma non li tocca.
+# (Fino alla 3.0 stavano in backend/data: vengono spostati qui automaticamente al primo avvio, vedi db.move_legacy_data.)
+DATA_DIR = os.environ.get("PAZIENTI_DATA_DIR") or os.path.join(os.path.expanduser("~"), "GestionePazienti-dati")
 DB_PATH = os.environ.get("PAZIENTI_DB", os.path.join(DATA_DIR, "pazienti.db"))
 SCHEMA_PATH = os.path.join(APP_DIR, "schema.sql")
 FRONTEND_DIST = os.environ.get("PAZIENTI_FRONTEND_DIST", os.path.join(PROJECT_DIR, "frontend", "dist"))
@@ -40,6 +42,10 @@ LOCK_SECONDS = 300
 MAX_FAILED_PER_IP = 20         # per indirizzo IP: dopo 20 errori in IP_WINDOW_SECONDS blocco di IP_LOCK_SECONDS
 IP_WINDOW_SECONDS = 900
 IP_LOCK_SECONDS = 900
-API_DOCS = os.environ.get("PAZIENTI_API_DOCS") == "1"   # documentazione /api/docs (solo per sviluppo)
+API_DOCS = os.environ.get("PAZIENTI_API_DOCS") == "1"
+BACKUP_ENABLED = os.environ.get("PAZIENTI_BACKUP", "1") != "0"   # backup giornaliero automatico del database
+# OCR delle foto (importazione referti): programma Tesseract installato sul PC server. Vuoto = ricerca automatica.
+TESSERACT_CMD = os.environ.get("PAZIENTI_TESSERACT", "")
+OCR_MAX_BYTES = 15 * 1024 * 1024   # documentazione /api/docs (solo per sviluppo)
 TEMP_PASSWORD_HOURS = int(os.environ.get("PAZIENTI_TEMP_PASSWORD_HOURS", "72"))  # validità password temporanea
 MAX_BLOB_LEN = 200_000   # dimensione massima di un dato cifrato

@@ -9,6 +9,7 @@ import { examDateProblem, examTrends, examView, filterExams, resolveStatus } fro
 import { itDate } from "../format";
 import { useAction } from "../hooks";
 import { Link, useRouter } from "../router";
+import { parseNumber, parseRange } from "../importDocs/parse";
 import { updateExam } from "../vault";
 
 export function ExamsPage() {
@@ -78,8 +79,18 @@ const fromExam = (e) => ({
   result_value: e.result_value || "",
   result_unit: e.result_unit || "",
   result_date: e.result_date || "",
+  reference_range: e.reference_range || "",
   notes: e.notes || "",
 });
+
+/** Valore fuori range: se valore e intervallo non sono cambiati tiene la segnalazione del laboratorio. */
+function outOfRange(value, range, raw) {
+  if ((value || null) === (raw.result_value || null) && (range || null) === (raw.reference_range || null)) return raw.out_of_range ?? null;
+  const n = parseNumber(value);
+  const b = parseRange(range);
+  if (n === null || !b) return null;
+  return (b.min !== null && n < b.min) || (b.max !== null && n > b.max);
+}
 
 export function ExamEditPage({ params }) {
   const { user, meta, vault, keys, reloadVault, flash } = useApp();
@@ -111,6 +122,9 @@ export function ExamEditPage({ params }) {
       exam_type_id: raw.exam_type_id, prescribed_date: f.prescribed_date, expected_date: f.expected_date || null,
       delivered_date: r.delivered, result_date: r.resultDate, status: r.status, result_value: value || null,
       result_unit: f.result_unit.trim() || null, notes: f.notes,
+      reference_range: f.reference_range.trim() || null,
+      out_of_range: outOfRange(value, f.reference_range, raw),
+      source: raw.source || null,
     };
     const problem = examDateProblem(data);
     if (problem) return flash(problem, "error");
@@ -168,6 +182,8 @@ export function ExamEditPage({ params }) {
             <label>Valore / esito<input value={f.result_value} onChange={set("result_value")} placeholder="es. 14,2 · soppresso · nella norma" /></label>
             <label>Unità di misura<input value={f.result_unit} onChange={set("result_unit")} /></label>
             <label>Data risultato<input type="date" value={f.result_date} onChange={set("result_date")} /></label>
+            <label className="span-2">Intervallo di riferimento<input value={f.reference_range} onChange={set("reference_range")} placeholder="es. 74-109 · < 4.5" /></label>
+            {e.out_of_range && <p className="span-1 out-of-range">⚠ Fuori dall'intervallo di riferimento</p>}
             <label className="span-3">Note / commento
               <textarea rows={4} value={f.notes} onChange={set("notes")} />
             </label>

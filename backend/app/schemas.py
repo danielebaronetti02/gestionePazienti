@@ -88,9 +88,17 @@ class ExamTypeIn(BaseModel):
     name: str
     category: str = ""
     unit: str = ""
+    code: str = ""
+    aliases: str = ""
 
 
 class ExamTypePatch(BaseModel):
     category: Optional[str] = None
     unit: Optional[str] = None
     active: Optional[bool] = None
+    code: Optional[str] = None
+    aliases: Optional[str] = None
+
+
+class OcrIn(BaseModel):
+    image_b64: str = Field(max_length=21_000_000)     # immagine PNG/JPEG in base64 (max ~15 MB)
