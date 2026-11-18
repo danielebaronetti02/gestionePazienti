@@ -1,7 +1,7 @@
 """Accesso con email e password, chiavi personali, cambio password."""
 from .. import config, security
 from ..constants import ROLES
-from ..db import get_state, set_state
+from ..db import get_state, remove_seed_password_file, set_state
 from ..errors import Forbidden, Invalid, TooManyRequests, Unauthorized
 from ..security import audit
 from ..utils import now
@@ -58,19 +58,23 @@ def key_material(ctx) -> dict:
 # ---------------------------------------------------------------------------
 def login(ctx, email: str, auth_hash: str):
     email = security.normalize_email(email)
-    if security.is_locked(email):
-        raise TooManyRequests("Troppi tentativi falliti. Riprova tra qualche minuto.")
     db = ctx.db
+    key_email, key_ip = f"email:{email}", (f"ip:{ctx.ip}" if ctx.ip else None)
+    if security.is_locked(db, key_email) or (key_ip and security.is_locked(db, key_ip)):
+        raise TooManyRequests("Troppi tentativi falliti. Riprova tra qualche minuto.")
     user = db.execute("SELECT * FROM users WHERE email = ? AND active = 1", (email,)).fetchone()
     if user is None or not security.verify_secret(auth_hash or "", user["auth_hash"]):
-        security.register_failure(email)
+        security.register_failure(db, key_email, config.MAX_FAILED_LOGINS, config.LOCK_SECONDS)
+        if key_ip:
+            security.register_failure(db, key_ip, config.MAX_FAILED_PER_IP, config.IP_LOCK_SECONDS, config.IP_WINDOW_SECONDS)
         audit(ctx, "login_fallito", username=email)
         db.commit()
         raise Unauthorized("Email o password non corretti.")
     if user["must_change_pw"] and user["temp_expires_at"] and user["temp_expires_at"] < now():
         raise Unauthorized("La password temporanea è scaduta: chiedi all'amministratore di inviarne una nuova.",
                            code="temp_password_expired")
-    security.reset_failures(email)
+    security.reset_failures(db, key_email)
+    security.purge_failures(db)
     security.purge_expired_sessions(db)
     token = security.create_session(db, user["id"], ctx.ip)
     ctx.user = dict(user)
@@ -126,5 +130,7 @@ def change_password(ctx, data: dict, token: str):
     security.delete_user_sessions(db, user["id"], except_token=token)
     audit(ctx, "cambio_password")
     db.commit()
+    if user["email"] == config.SEED_ADMIN_EMAIL:
+        remove_seed_password_file()     # la password iniziale non serve più
     ctx.user = dict(db.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
     return user_out(db, ctx.user)

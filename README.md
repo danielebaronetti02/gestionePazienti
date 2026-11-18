@@ -47,7 +47,7 @@ cd ..\backend
 ```
 </details>
 
-Poi aprite **<http://localhost:8000>** nel browser.
+Poi aprite **<http://localhost:8000>** nel browser e fate il primo accesso con la password iniziale (vedi sezione 4).
 
 ## 2. Avvio automatico all'accensione del PC
 
@@ -90,13 +90,15 @@ powershell -ExecutionPolicy Bypass -File windows\gestione.ps1 stato        # opp
 
 ## 4. Primo accesso e gestione degli utenti
 
-- **Amministratore iniziale**, creato automaticamente al primo avvio:
-
-  | Email | Password |
-  |---|---|
-  | `admin@uniroma1.it` | `Cambiami-subito-2026` |
-
-  Al primo accesso **la password va cambiata** obbligatoriamente, e in quel momento il browser crea le chiavi dell'archivio. Si possono cambiare email e password iniziali prima del primo avvio, con le variabili in fondo alla pagina.
+- **Amministratore iniziale:** al primo avvio il server crea l'account `admin@uniroma1.it` con una **password casuale**, diversa per ogni installazione.
+  - La password si trova nel file `backend\data\PASSWORD-INIZIALE-ADMIN.txt`. La mostrano anche `avvia.cmd`, `attiva-avvio-automatico.cmd` e `stato.cmd`.
+  - Al primo accesso **la password va cambiata** obbligatoriamente. In quel momento il browser crea le chiavi dell'archivio e il file con la password iniziale **si cancella da solo**.
+  - Fate il primo accesso subito dopo l'installazione: finché non lo fate, chi legge quel file può entrare come amministratore.
+- **Regole per le password**, controllate nel browser perché il server non vede mai le password:
+  - almeno 12 caratteri;
+  - almeno 3 tipi tra minuscole, maiuscole, numeri e simboli, oppure una frase di almeno 16 caratteri;
+  - non sono accettate password comuni (`Password2026!`, `Forzaroma…`), sequenze, caratteri ripetuti né il proprio nome o la propria email.
+- **Tentativi sbagliati:** dopo 5 errori sullo stesso account, l'accesso si blocca per 5 minuti. Dopo 20 errori dallo stesso computer in 15 minuti, quel computer è bloccato per 15 minuti. I blocchi restano attivi anche se il server viene riavviato.
 - **L'amministratore** fa tutto quello che fa un medico (pazienti, esami, visite, esportazione). Inoltre, dal menu **Utenti**, può **vedere, aggiungere, modificare ed eliminare** gli altri utenti. Gestisce anche i **Cataloghi** e il **Registro accessi**.
 - **Nuovo utente** (*Utenti → + Nuovo utente*):
   - si indicano nome, email (qualsiasi indirizzo valido), ruolo (Amministratore / Medico / Sola consultazione) e il permesso di vedere l'anagrafica;
@@ -137,17 +139,43 @@ I comandi sono gli stessi di Windows, ma nella cartella `mac/` e con l'estension
 
 ## 5. Accesso da altri PC della rete
 
+Per sicurezza il server risponde **solo a questo PC** (`PAZIENTI_HOST=127.0.0.1`). Aprirlo alla rete in HTTP non servirebbe, perché l'app non funziona comunque, ed esporrebbe solo la pagina di accesso a tentativi dalla rete.
+
 La crittografia del browser (WebCrypto) funziona **solo su `https://` oppure su `http://localhost`**. Ne segue che:
 
 - **sul PC che ospita il server** l'indirizzo `http://localhost:8000` funziona sempre;
 - **dagli altri PC** `http://<ip-del-server>:8000` **non basta**: l'app mostra “Connessione non sicura”. Serve un indirizzo HTTPS, con un certificato del servizio informatico oppure un reverse proxy come Caddy o IIS, davanti alla porta 8000. Con HTTPS impostate anche `set PAZIENTI_HTTPS=1` in `impostazioni.cmd`;
+- se il proxy HTTPS gira **sullo stesso PC**, lasciate `127.0.0.1`. Se gira su un'altra macchina, impostate `PAZIENTI_HOST=0.0.0.0` e limitate l'accesso alla porta 8000 a quella macchina con il firewall;
 - `windows\gestione.ps1 apri-firewall` apre la porta nel firewall di Windows, per le reti private e di dominio.
 
 ## 6. Backup
 
-Tutti i dati stanno in **`backend\data\pazienti.db`**. Copiatelo regolarmente, a server spento oppure con lo strumento di backup di SQLite.
+Tutti i dati stanno in **`pazienti.db`**, nella cartella dati. Copiatelo regolarmente, per esempio una volta al giorno, su un supporto separato come un disco esterno o una cartella di rete dell'unità.
+- Fate la copia a server spento, oppure con lo strumento di backup di SQLite.
 - Il file contiene solo dati cifrati, quindi il backup non espone i pazienti.
 - Senza almeno un account funzionante, però, il backup non è leggibile.
+
+## 7. Lista di controllo prima di inserire pazienti reali
+
+1. **Autorizzazioni:** fatevi approvare il trattamento dal **DPO** e dal servizio informatico dell'ospedale o dell'università: registro dei trattamenti ed eventuale DPIA. Concordate su quale macchina far girare il server; un portatile personale di solito non è accettato.
+2. **Cartella dati fuori da Desktop e OneDrive:** in `impostazioni.cmd` attivate `set PAZIENTI_DATA_DIR=C:\GestionePazienti\dati`, poi `riavvia.cmd`. Se la cartella `backend\data` esiste già, spostate prima il suo contenuto, a server spento.
+3. **Disco cifrato:** attivate **BitLocker** sul PC server (su Mac, **FileVault**).
+4. **Sistema del PC server:** aggiornamenti automatici attivi, blocco schermo con password e possibilmente un account di Windows dedicato al server, senza permessi di amministratore.
+5. **Almeno due amministratori**, più una **credenziale di emergenza** (un account amministratore la cui password sta in busta chiusa in un armadio). Senza un amministratore funzionante l'archivio non si può più leggere.
+6. **Backup** automatici di `pazienti.db` (sezione 6) e una prova di ripristino.
+7. **Controllo periodico delle librerie**, per esempio una volta al mese:
+   ```powershell
+   cd backend
+   .venv\Scripts\python -m pip install pip-audit
+   .venv\Scripts\pip-audit -r requirements.lock.txt
+   ```
+   Se segnala vulnerabilità: cancellate `requirements.lock.txt`, rieseguite `installa.cmd` (aggiorna le librerie e ricrea il lock) e salvate il lock su git.
+8. **Dati in chiaro:** nel documento per il DPO va indicato che restano leggibili sul server:
+   - email, nomi e ruoli degli utenti;
+   - codici pseudonimi dei pazienti e cataloghi;
+   - date di creazione e modifica dei record;
+   - numero di esami e visite per paziente;
+   - registro accessi (utente, azione, IP).
 
 ## Come funziona la cifratura
 
@@ -174,9 +202,10 @@ chiave privata ── apre ──► chiavi dell'archivio (AES-GCM 256), "avvolt
 ## Sviluppo (modifica del codice)
 
 ```powershell
-# 1) backend → http://127.0.0.1:8000  (documentazione API: /api/docs)
+# 1) backend → http://127.0.0.1:8000
 cd backend
 .venv\Scripts\activate
+$env:PAZIENTI_API_DOCS = "1"       # facoltativo: documentazione API su /api/docs (spenta in produzione)
 uvicorn app.main:app --reload
 
 # 2) frontend con ricarica automatica → http://localhost:5173  (le chiamate /api vanno al backend)
@@ -194,12 +223,13 @@ Si imposta in `windows\impostazioni.cmd`, con righe `set NOME=valore`, oppure co
 
 | Variabile | Significato | Default |
 |---|---|---|
-| `PAZIENTI_PORTA` / `PAZIENTI_HOST` | porta e indirizzo di ascolto (solo script Windows) | `8000` / `0.0.0.0` |
+| `PAZIENTI_PORTA` / `PAZIENTI_HOST` | porta e indirizzo di ascolto (solo script Windows) | `8000` / `127.0.0.1` |
 | `PAZIENTI_DATA_DIR` | cartella dati (database, log) | `backend\data` |
-| `PAZIENTI_ADMIN_EMAIL` / `PAZIENTI_ADMIN_PASSWORD` / `PAZIENTI_ADMIN_NAME` | amministratore creato al primo avvio (solo se non esiste ancora nessun utente) | `admin@uniroma1.it` / `Cambiami-subito-2026` / `Amministratore` |
+| `PAZIENTI_ADMIN_EMAIL` / `PAZIENTI_ADMIN_PASSWORD` / `PAZIENTI_ADMIN_NAME` | amministratore creato al primo avvio (solo se non esiste ancora nessun utente) | `admin@uniroma1.it` / **casuale** (nel file `PASSWORD-INIZIALE-ADMIN.txt`) / `Amministratore` |
 | `PAZIENTI_TEMP_PASSWORD_HOURS` | validità delle password temporanee | `72` |
 | `PAZIENTI_SESSION_MINUTES` | minuti di inattività dopo cui la sessione si chiude | `5` |
 | `PAZIENTI_HTTPS` | `1` = cookie di sessione solo su HTTPS | — |
+| `PAZIENTI_API_DOCS` | `1` = documentazione delle API su `/api/docs` (solo sviluppo) | spenta |
 | `PAZIENTI_KDF_ITERATIONS` | iterazioni PBKDF2 — **non modificare dopo l'installazione** | `600000` |
 
 ## Struttura

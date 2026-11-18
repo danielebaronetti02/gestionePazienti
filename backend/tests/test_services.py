@@ -37,7 +37,7 @@ def env(monkeypatch):
     tmp = tempfile.mkdtemp()
     monkeypatch.setattr(config, "DB_PATH", os.path.join(tmp, "p.db"))
     monkeypatch.setattr(config, "KDF_ITERATIONS", 1000)   # più veloce nei test
-    security.reset_failures()
+    monkeypatch.setattr(config, "SEED_ADMIN_PASSWORD", None)   # password iniziale casuale, come in produzione
     assert dbmod.init_db() is True
     con = dbmod.connect()
     yield {"db": con, "tmp": tmp}
@@ -108,6 +108,33 @@ def test_login_lockout_and_wrong_password(env):
             login(env, config.SEED_ADMIN_EMAIL, "sbagliata")
     with pytest.raises(TooManyRequests):
         login(env, config.SEED_ADMIN_EMAIL, config.SEED_ADMIN_PASSWORD)
+    # il blocco è nel database: resiste al riavvio del server (nuova connessione)
+    env["db"].close()
+    env["db"] = dbmod.connect()
+    with pytest.raises(TooManyRequests):
+        login(env, config.SEED_ADMIN_EMAIL, config.SEED_ADMIN_PASSWORD)
+
+
+def test_login_lockout_per_ip(env):
+    # tanti account diversi dallo stesso IP: dopo 20 errori l'IP è bloccato, anche con la password giusta
+    for i in range(config.MAX_FAILED_PER_IP):
+        with pytest.raises(Unauthorized):
+            login(env, f"tentativo{i}@esempio.it", "sbagliata")
+    with pytest.raises(TooManyRequests):
+        login(env, config.SEED_ADMIN_EMAIL, config.SEED_ADMIN_PASSWORD)
+    other = Context(db=env["db"], ip="10.0.0.99")     # da un altro PC si entra
+    user, _ = auth.login(other, config.SEED_ADMIN_EMAIL, ah(config.SEED_ADMIN_EMAIL, config.SEED_ADMIN_PASSWORD))
+    assert user["email"] == config.SEED_ADMIN_EMAIL
+
+
+def test_seed_password_is_random_and_file_removed_after_change(env):
+    path = config.seed_password_file()
+    assert os.path.exists(path)
+    text = open(path, encoding="utf-8").read()
+    assert config.SEED_ADMIN_PASSWORD in text and len(config.SEED_ADMIN_PASSWORD) == 23
+    assert "Cambiami" not in config.SEED_ADMIN_PASSWORD
+    first_admin(env)                                   # cambio password dell'admin iniziale
+    assert not os.path.exists(path)
 
 
 def test_admin_creates_doctors_any_valid_email(env):

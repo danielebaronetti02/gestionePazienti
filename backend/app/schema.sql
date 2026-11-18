@@ -106,3 +106,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen  TEXT NOT NULL,
     ip         TEXT
 );
+
+-- Tentativi di accesso falliti (per account e per indirizzo IP): sopravvivono al riavvio del server
+CREATE TABLE IF NOT EXISTS login_failures (
+    key          TEXT PRIMARY KEY,           -- "email:<indirizzo>" oppure "ip:<indirizzo>"
+    fails        INTEGER NOT NULL DEFAULT 0,
+    window_start REAL NOT NULL,
+    locked_until REAL NOT NULL DEFAULT 0
+);

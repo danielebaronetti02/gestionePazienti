@@ -39,7 +39,7 @@ def client(monkeypatch):
     tmp = tempfile.mkdtemp()
     monkeypatch.setattr(config, "DB_PATH", os.path.join(tmp, "p.db"))
     monkeypatch.setattr(config, "KDF_ITERATIONS", 1000)
-    security.reset_failures()
+    monkeypatch.setattr(config, "SEED_ADMIN_PASSWORD", None)   # password iniziale casuale, come in produzione
     from app.main import app
     with TestClient(app) as c:      # esegue l'avvio: tabelle, cataloghi, admin di seed
         c.headers.update(CSRF)

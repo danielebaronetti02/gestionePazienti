@@ -26,6 +26,13 @@ giallo() { printf '  \033[33m--\033[0m  %s\n' "$1"; }
 risponde() { curl -fsS -m 3 "$URL/api/public-config" >/dev/null 2>&1; }
 pid_porta() { lsof -nP -t -iTCP:"$PORTA" -sTCP:LISTEN 2>/dev/null; }
 caricato() { launchctl print "$DOMINIO/$ETICHETTA" >/dev/null 2>&1; }
+mostra_password_iniziale() {
+  local f="$DATI/PASSWORD-INIZIALE-ADMIN.txt"
+  if [ -f "$f" ]; then
+    echo; echo "  Primo accesso dell'amministratore (il file si cancella da solo dopo il cambio password):"
+    grep -E '^(Email|Password):' "$f" | sed 's/^/      /'; echo "      (file: $f)"
+  fi
+}
 attendi() { for _ in $(seq 1 40); do risponde && return 0; sleep 1; done; return 1; }
 
 controlla_cartella() {
@@ -60,7 +67,14 @@ installa() {
   [ -x "$PY_VENV" ] || { echo "Creo l'ambiente Python (backend/.venv)..."; "$PY" -m venv .venv || { rosso "Creazione dell'ambiente non riuscita."; exit 1; }; }
   echo "Installo le librerie Python..."
   "$PY_VENV" -m pip install --upgrade pip --quiet --disable-pip-version-check
-  "$PY_VENV" -m pip install -r requirements.txt --quiet --disable-pip-version-check || { rosso "pip install non riuscito."; exit 1; }
+  if [ -f requirements.lock.txt ]; then
+    echo "  (versioni fissate da requirements.lock.txt)"
+    "$PY_VENV" -m pip install -r requirements.lock.txt --quiet --disable-pip-version-check || { rosso "pip install non riuscito."; exit 1; }
+  else
+    "$PY_VENV" -m pip install -r requirements.txt --quiet --disable-pip-version-check || { rosso "pip install non riuscito."; exit 1; }
+    "$PY_VENV" -m pip freeze --exclude pip --exclude setuptools > requirements.lock.txt
+    verde "Versioni delle librerie salvate in backend/requirements.lock.txt (da salvare anche su git)"
+  fi
   "$PY_VENV" -c "import fastapi, pydantic_core, uvicorn" || { rosso "Le librerie Python non si caricano (vedi errore sopra)."; exit 1; }
   verde "Backend pronto"
 
@@ -68,7 +82,7 @@ installa() {
     local copia; copia="$(mktemp -d)"
     [ -f "$FRONTEND/dist/index.html" ] && cp -R "$FRONTEND/dist" "$copia/dist"
     echo "Compilo il frontend (npm install + npm run build)..."
-    if (cd "$FRONTEND" && npm install --no-audit --no-fund && npm run build) && [ -f "$FRONTEND/dist/index.html" ]; then
+    if (cd "$FRONTEND" && { { [ -f package-lock.json ] && npm ci --no-audit --no-fund; } || npm install --no-audit --no-fund; } && npm run build) && [ -f "$FRONTEND/dist/index.html" ]; then
       verde "Frontend compilato in frontend/dist"
     elif [ -f "$copia/dist/index.html" ]; then
       rm -rf "$FRONTEND/dist"; cp -R "$copia/dist" "$FRONTEND/dist"
@@ -116,7 +130,7 @@ attiva() {
   scrivi_plist
   launchctl bootstrap "$DOMINIO" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
   verde "Avvio automatico attivato: il server partira' a ogni accensione del Mac (al login dell'utente $(whoami))."
-  if attendi; then verde "Server acceso: $URL"; else rosso "Il server non risponde. Ultime righe del log:"; tail -n 20 "$LOG" 2>/dev/null; exit 1; fi
+  if attendi; then verde "Server acceso: $URL"; mostra_password_iniziale; else rosso "Il server non risponde. Ultime righe del log:"; tail -n 20 "$LOG" 2>/dev/null; exit 1; fi
 }
 
 disattiva() {
@@ -144,7 +158,7 @@ avvia() {
   fi
   echo "Avvio in corso..."
   if attendi; then
-    verde "Server acceso: $URL"
+    verde "Server acceso: $URL"; mostra_password_iniziale
     [ -f "$PLIST" ] || giallo "Avvio manuale: dopo uno spegnimento del Mac non ripartira'. Per l'avvio automatico: attiva-avvio-automatico.command"
   else
     rosso "Il server non risponde. Ultime righe del log ($LOG):"; tail -n 25 "$LOG" 2>/dev/null; exit 1
@@ -165,6 +179,7 @@ ferma() {
 stato() {
   echo "== Gestione Pazienti =="
   if risponde; then verde "Server ACCESO: $URL"; else rosso "Server SPENTO (porta $PORTA)"; fi
+  mostra_password_iniziale
   if [ -f "$PLIST" ]; then verde "Avvio automatico ATTIVO ($PLIST)"; else giallo "Avvio automatico NON attivo (attivalo con attiva-avvio-automatico.command)"; fi
   [ -f "$LOG" ] && { echo "Ultime righe del log ($LOG):"; tail -n 8 "$LOG" | sed 's/^/      /'; }
 }

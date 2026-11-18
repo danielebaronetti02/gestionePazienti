@@ -139,31 +139,40 @@ def purge_expired_sessions(db):
 # ---------------------------------------------------------------------------
 # Blocco temporaneo dopo troppi tentativi
 # ---------------------------------------------------------------------------
-_failures = {}
+def is_locked(db, key: str) -> bool:
+    row = db.execute("SELECT locked_until FROM login_failures WHERE key = ?", (key,)).fetchone()
+    return bool(row) and row["locked_until"] > time.time()
 
 
-def is_locked(key: str) -> bool:
-    return _failures.get(key, (0, 0))[1] > time.time()
+def register_failure(db, key: str, limit: int, lock_seconds: int, window_seconds: int = 3600):
+    """Conta un tentativo fallito; superato il limite nella finestra di tempo, blocca la chiave."""
+    t = time.time()
+    row = db.execute("SELECT fails, window_start FROM login_failures WHERE key = ?", (key,)).fetchone()
+    fails, start = (row["fails"], row["window_start"]) if row and t - row["window_start"] < window_seconds else (0, t)
+    fails += 1
+    locked = t + lock_seconds if fails >= limit else 0
+    if locked:
+        fails, start = 0, t          # dopo il blocco si riparte da zero
+    db.execute("""INSERT INTO login_failures (key, fails, window_start, locked_until) VALUES (?,?,?,?)
+                  ON CONFLICT(key) DO UPDATE SET fails = excluded.fails, window_start = excluded.window_start,
+                  locked_until = MAX(login_failures.locked_until, excluded.locked_until)""", (key, fails, start, locked))
 
 
-def register_failure(key: str):
-    fails = _failures.get(key, (0, 0))[0] + 1
-    _failures[key] = (fails, time.time() + config.LOCK_SECONDS if fails >= config.MAX_FAILED_LOGINS else 0)
+def reset_failures(db, key: str):
+    db.execute("DELETE FROM login_failures WHERE key = ?", (key,))
 
 
-def reset_failures(key: str = None):
-    if key is None:
-        _failures.clear()
-    else:
-        _failures.pop(key, None)
+def purge_failures(db):
+    db.execute("DELETE FROM login_failures WHERE locked_until < ? AND window_start < ?", (time.time(), time.time() - 86400))
 
 
 # ---------------------------------------------------------------------------
 # Registro accessi
 # ---------------------------------------------------------------------------
 def audit(ctx, action, patient_code=None, details=None, username=None):
-    """Scrive una voce nel registro (commit a carico del chiamante)."""
+    """Scrive una voce nel registro. Il commit è a carico del chiamante."""
     u = ctx.user
     ctx.db.execute(
         "INSERT INTO audit_log (user_id, username, action, patient_code, details, ip) VALUES (?,?,?,?,?,?)",
-        (u["id"] if u else None, username or (u["email"] if u else None), action, patient_code, details, ctx.ip))
+        (u["id"] if u else None, username or (u["email"] if u else None), action, patient_code,
+         details, ctx.ip))

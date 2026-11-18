@@ -4,9 +4,9 @@
 # Porta su cui risponde il server: http://localhost:8000
 PAZIENTI_PORTA=8000
 
-# 0.0.0.0 = raggiungibile anche dagli altri PC della rete (serve HTTPS, vedi README)
-# 127.0.0.1 = solo da questo Mac
-PAZIENTI_HOST=0.0.0.0
+# 127.0.0.1 = solo da questo Mac (consigliato)
+# 0.0.0.0   = anche dagli altri PC della rete: SOLO dopo aver messo HTTPS davanti (vedi README)
+PAZIENTI_HOST=127.0.0.1
 
 # Altre impostazioni facoltative (togliete "#" davanti per attivarle):
 # export PAZIENTI_SESSION_MINUTES=5

@@ -1,7 +1,7 @@
 """Applicazione FastAPI.
 
 Sviluppo:    uvicorn app.main:app --reload            (frontend separato: cd frontend && npm run dev)
-Produzione:  uvicorn app.main:app --host 0.0.0.0 --port 8000
+Produzione:  python -m app --port 8000   (oppure gli script in windows/ e mac/)
              (dopo 'npm run build' il frontend compilato viene servito da qui, sullo stesso indirizzo)
 """
 import os
@@ -25,13 +25,16 @@ CSP = ("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';
 async def lifespan(_app: FastAPI):
     """All'avvio: crea tabelle, cataloghi e (database vuoto) l'amministratore di seed."""
     if dbmod.init_db():
-        print("\n" + "=" * 64 + f"\n  Creato l'amministratore {config.SEED_ADMIN_EMAIL}"
-              "\n  con la password iniziale configurata: va cambiata al primo accesso.\n" + "=" * 64 + "\n")
+        where = (f"la password iniziale è nel file\n  {config.seed_password_file()}"
+                 if os.path.exists(config.seed_password_file()) else "con la password di PAZIENTI_ADMIN_PASSWORD")
+        print("\n" + "=" * 64 + f"\n  Creato l'amministratore {config.SEED_ADMIN_EMAIL}:\n  {where}"
+              "\n  Va cambiata al primo accesso.\n" + "=" * 64 + "\n", flush=True)
     yield
 
 
 app = FastAPI(title="Gestione Pazienti", version="3.0", lifespan=lifespan,
-              docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
+              docs_url="/api/docs" if config.API_DOCS else None, redoc_url=None,
+              openapi_url="/api/openapi.json" if config.API_DOCS else None)
 
 
 # ---------------------------------------------------------------------------

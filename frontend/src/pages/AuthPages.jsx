@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useApp } from "../appContext";
 import { EMAIL_RE } from "../format";
+import { passwordProblem } from "../passwordPolicy";
 import { useAction, useForm } from "../hooks";
 import { useRouter } from "../router";
 import { changePassword, loginWithPassword, refreshGrants, unlockWithPassword, WrongPassword } from "../vault";
@@ -17,12 +18,6 @@ function Brand() {
 
 function emailProblem(email) {
   return EMAIL_RE.test(email.trim()) ? null : "Indirizzo email non valido.";
-}
-
-function passwordProblem(cfg, pw, confirm) {
-  if (pw.length < cfg.min_password_len) return `La password deve avere almeno ${cfg.min_password_len} caratteri.`;
-  if (confirm !== undefined && pw !== confirm) return "Le due password non coincidono.";
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +117,7 @@ export function ChangePasswordPage() {
 
   const submit = (e) => {
     e.preventDefault();
-    const problem = passwordProblem(cfg, f.next, f.confirm) || (f.next === f.current ? "La nuova password deve essere diversa da quella attuale." : null);
+    const problem = passwordProblem(cfg.min_password_len, f.next, f.confirm, user.email) || (f.next === f.current ? "La nuova password deve essere diversa da quella attuale." : null);
     if (problem) return flash(problem, "error");
     run(async () => {
       try {
@@ -150,7 +145,8 @@ export function ChangePasswordPage() {
         <label>Password attuale
           <input type="password" value={f.current} onChange={bind("current")} autoComplete="current-password" required />
         </label>
-        <label>Nuova password <small className="muted">(almeno {cfg.min_password_len} caratteri)</small>
+        <label>Nuova password
+          <small className="muted"> (almeno {cfg.min_password_len} caratteri e 3 tipi tra minuscole, maiuscole, numeri e simboli; oppure una frase di 16+ caratteri)</small>
           <input type="password" value={f.next} onChange={bind("next")} minLength={cfg.min_password_len} autoComplete="new-password" required />
         </label>
         <label>Ripeti nuova password

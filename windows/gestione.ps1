@@ -66,6 +66,17 @@ function Richiedi-Amministratore {
 
 function Attivita { return Get-ScheduledTask -TaskName $NomeAttivita -ErrorAction SilentlyContinue }
 
+# Al primo avvio il server crea l'admin con una password casuale scritta in questo file
+function Mostra-PasswordIniziale {
+  $f = Join-Path $DatiDir "PASSWORD-INIZIALE-ADMIN.txt"
+  if (Test-Path $f) {
+    Write-Host ""
+    Scrivi "  Primo accesso dell'amministratore (il file si cancella da solo dopo il cambio password):" Cyan
+    Get-Content $f | Where-Object { $_ -match '^(Email|Password):' } | ForEach-Object { Write-Host "      $_" -ForegroundColor White }
+    Scrivi "      (file: $f)"
+  }
+}
+
 function Server-Risponde {
   try {
     $r = Invoke-WebRequest -Uri "$Url/api/public-config" -UseBasicParsing -TimeoutSec 3
@@ -141,7 +152,17 @@ function Installa {
     }
     Scrivi "Installo le librerie Python..."
     & $PythonVenv -m pip install --upgrade pip --quiet --disable-pip-version-check
-    & $PythonVenv -m pip install -r requirements.txt --quiet --disable-pip-version-check
+    $Lock = Join-Path $Backend "requirements.lock.txt"
+    if (Test-Path $Lock) {
+      Scrivi "  (versioni fissate da requirements.lock.txt)"
+      & $PythonVenv -m pip install -r requirements.lock.txt --quiet --disable-pip-version-check
+    } else {
+      & $PythonVenv -m pip install -r requirements.txt --quiet --disable-pip-version-check
+      if ($LASTEXITCODE -eq 0) {
+        & $PythonVenv -m pip freeze --exclude pip --exclude setuptools | Set-Content -Encoding ascii $Lock
+        Ok "Versioni delle librerie salvate in backend\requirements.lock.txt (da salvare anche su git)"
+      }
+    }
     if ($LASTEXITCODE -ne 0) {
       Errore "pip install non riuscito."
       Scrivi "  Se l'errore parla di 'Microsoft Visual C++' o 'Rust', la tua versione di Python e' troppo nuova:" Yellow
@@ -167,7 +188,8 @@ function Installa {
     Push-Location $Frontend
     try {
       Scrivi "Installo le librerie del frontend (npm install)..."
-      & npm install --no-audit --no-fund
+      if (Test-Path (Join-Path $Frontend "package-lock.json")) { & npm ci --no-audit --no-fund }
+      if (-not (Test-Path (Join-Path $Frontend "package-lock.json")) -or $LASTEXITCODE -ne 0) { & npm install --no-audit --no-fund }
       if ($LASTEXITCODE -eq 0) {
         Scrivi "Compilo il frontend (npm run build)..."
         & npm run build
@@ -248,6 +270,7 @@ function Avvia {
   Scrivi "Avvio in corso..."
   if (Attendi-Server) {
     Ok "Server acceso: $Url"
+    Mostra-PasswordIniziale
     if (-not $t) { Scrivi "  (avvio manuale: dopo uno spegnimento del PC non ripartira'. Per l'avvio automatico: attiva-avvio-automatico.cmd)" Yellow }
     return $true
   }
@@ -285,6 +308,7 @@ function Ferma {
 function Stato {
   Scrivi "== Gestione Pazienti ==" Cyan
   if (Server-Risponde) { Ok "Server ACCESO: $Url" } else { Errore "Server SPENTO (porta $Porta)" }
+  Mostra-PasswordIniziale
   $t = Attivita
   if ($t) {
     $info = Get-ScheduledTaskInfo -TaskName $NomeAttivita
